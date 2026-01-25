@@ -1,0 +1,19 @@
+{
+  "name": "goko",
+  "version": "0.1.0",
+  "private": true,
+  "description": "옵시디언 캔버스 + 구글맵 여행 계획 도구",
+  "scripts": {
+    "dev": "pnpm --filter @goko/web dev",
+    "build": "pnpm --filter @goko/web build",
+    "preview": "pnpm --filter @goko/web preview",
+    "lint": "pnpm --filter @goko/web lint",
+    "format": "pnpm --filter @goko/web format",
+    "test": "pnpm --filter @goko/web test",
+    "test:e2e": "pnpm --filter @goko/web test:e2e"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  }
+}
