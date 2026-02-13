@@ -189,18 +189,29 @@ function MapPanel() {
     }
   }, [selectedProvince]);
 
-  // TourAPI 결과를 Board로 동기화
+  // // TourAPI 결과를 Board로 동기화
+  // useEffect(() => {
+  //   if (tourSpots.length > 0) {
+  //     const placesData = tourSpots.map((spot) => ({
+  //       placeId: spot.contentId,
+  //       name: spot.title,
+  //       address: spot.addr1 + (spot.addr2 ? ` ${spot.addr2}` : ''),
+  //       lat: spot.mapy,
+  //       lng: spot.mapx,
+  //     }));
+  //     importPlaces(placesData);
+  //   }
+  // }, [tourSpots, importPlaces]);
+
   useEffect(() => {
-    if (tourSpots.length > 0) {
-      const placesData = tourSpots.map((spot) => ({
-        placeId: spot.contentId,
-        name: spot.title,
-        address: spot.addr1 + (spot.addr2 ? ` ${spot.addr2}` : ''),
-        lat: spot.mapy,
-        lng: spot.mapx,
-      }));
-      importPlaces(placesData);
-    }
+    const placesData = tourSpots.map((spot) => ({
+      placeId: spot.contentId,
+      name: spot.title,
+      address: spot.addr1 + (spot.addr2 ? ` ${spot.addr2}` : ''),
+      lat: spot.mapy,
+      lng: spot.mapx,
+    }));
+    importPlaces(placesData);
   }, [tourSpots, importPlaces]);
 
   const handleFitBounds = useCallback(() => {

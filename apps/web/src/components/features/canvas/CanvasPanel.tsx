@@ -8,9 +8,16 @@ import ReactFlow, {
   BackgroundVariant,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+
 import { useBoardStore, usePlaces, useRouteOrder } from '@/store/useBoardStore';
-import { useTourApiLoading, useTourApiError } from '@/store/useTourApiStore';
+import {
+  useTourApiLoading,
+  useTourApiError,
+  useTourSpots,
+  useTourApiStore,
+} from '@/store/useTourApiStore';
 import { useSelectedProvince } from '@/store/useProvinceStore';
+
 import PlaceNode from './PlaceNode';
 import CanvasToolbar from './CanvasToolbar';
 import type { Place } from '@/shared/types';
@@ -33,22 +40,27 @@ function CanvasPanel() {
 
   const isLoading = useTourApiLoading();
   const error = useTourApiError();
+  const tourSpots = useTourSpots();
+  const lastFetchedProvince = useTourApiStore((s) => s.lastFetchedProvince);
+
   const selectedProvince = useSelectedProvince();
 
   // Place들을 React Flow 노드로 변환
   const nodes = useMemo((): Node<PlaceNodeData>[] => {
-    return routeOrder.map((id, index) => {
-      const place = placesById[id];
-      if (!place) return null;
+    return routeOrder
+      .map((id, index) => {
+        const place = placesById[id];
+        if (!place) return null;
 
-      return {
-        id: place.id,
-        type: 'placeNode',
-        position: { x: place.canvasPos.x, y: place.canvasPos.y },
-        data: { place, index },
-        draggable: true,
-      };
-    }).filter(Boolean) as Node<PlaceNodeData>[];
+        return {
+          id: place.id,
+          type: 'placeNode',
+          position: { x: place.canvasPos.x, y: place.canvasPos.y },
+          data: { place, index },
+          draggable: true,
+        };
+      })
+      .filter(Boolean) as Node<PlaceNodeData>[];
   }, [placesById, routeOrder]);
 
   // 노드 변경 핸들러 (드래그 이동)
@@ -56,7 +68,6 @@ function CanvasPanel() {
     (changes: NodeChange[]) => {
       changes.forEach((change) => {
         if (change.type === 'position' && change.position && change.dragging === false) {
-          // 드래그가 끝났을 때만 저장
           movePlace(change.id, { x: change.position.x, y: change.position.y });
         }
       });
@@ -66,13 +77,12 @@ function CanvasPanel() {
 
   // 뷰포트 변경 핸들러
   const onMoveEnd = useCallback(
-    (_: unknown, viewport: { x: number; y: number; zoom: number }) => {
+    (_evt: any, viewport: { x: number; y: number; zoom: number }) => {
       setCanvasViewport(viewport);
     },
     [setCanvasViewport]
   );
 
-  // 빈 상태 렌더링
   const renderEmptyState = () => {
     if (isLoading) {
       return (
@@ -100,6 +110,17 @@ function CanvasPanel() {
       );
     }
 
+    // ✅ 핵심: “조회 완료 + 결과 0개”를 로딩이 아니라 “없음”으로 보여주기
+    if (lastFetchedProvince === selectedProvince && tourSpots.length === 0) {
+      return (
+        <div className="canvas-empty-state">
+          <p>{selectedProvince}에서 명소를 찾을 수 없습니다.</p>
+          <p className="canvas-empty-hint">다른 지역을 선택하거나 조건을 바꿔보세요.</p>
+        </div>
+      );
+    }
+
+    // 보드에 아직 place가 안 올라온 상태(잠깐)
     if (routeOrder.length === 0) {
       return (
         <div className="canvas-empty-state">
@@ -118,7 +139,15 @@ function CanvasPanel() {
       <CanvasToolbar />
 
       {emptyState ? (
-        <div className="canvas-background" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div
+          className="canvas-background"
+          style={{
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           {emptyState}
         </div>
       ) : (
@@ -134,13 +163,9 @@ function CanvasPanel() {
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#333" />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
           <Controls position="bottom-right" />
-          <MiniMap
-            nodeColor="#667eea"
-            maskColor="rgba(0, 0, 0, 0.8)"
-            style={{ background: '#1e293b' }}
-          />
+          <MiniMap style={{ background: '#1e293b' }} />
         </ReactFlow>
       )}
     </div>

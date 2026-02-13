@@ -130,18 +130,21 @@ export async function fetchTourSpots(
     throw new Error('TourAPI 서비스 키가 설정되지 않았습니다.');
   }
 
-  const { areaCode, contentTypeId = 12, numOfRows = 20, pageNo = 1 } = options;
+  const { areaCode, contentTypeId, numOfRows = 20, pageNo = 1 } = options;
 
   const params = new URLSearchParams({
     MobileOS: 'ETC',
     MobileApp: 'GOKO',
     _type: 'json',
     areaCode: String(areaCode),
-    contentTypeId: String(contentTypeId),
     numOfRows: String(numOfRows),
     pageNo: String(pageNo),
     arrange: 'A', // 제목순 정렬
   });
+
+  if (typeof contentTypeId === 'number') {
+    params.set('contentTypeId', String(contentTypeId));
+  }
 
   // 개발 환경: Vite proxy 사용 (/api/tour)
   // 프로덕션: 실제 API URL 또는 백엔드 프록시 사용
@@ -196,7 +199,8 @@ export async function fetchTourSpots(
   const items = Array.isArray(body.items.item) ? body.items.item : [body.items.item];
 
   const spots = items.map(mapToTourSpot);
-
+  console.log('[spot sample]', items[0]?.title, items[0]?.mapx, items[0]?.mapy);
+  console.log('[TourAPI Request]', url);
   return {
     spots,
     totalCount: body.totalCount,
