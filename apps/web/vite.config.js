@@ -8,4 +8,14 @@ export default defineConfig({
             '@': path.resolve(__dirname, './src'),
         },
     },
+    server: {
+        proxy: {
+          '/api/tour': {
+            target: 'https://apis.data.go.kr',
+            changeOrigin: true,
+            secure: true,
+            rewrite: (path) => path.replace(/^\/api\/tour/, '/B551011/EngService2'),
+          },
+        },
+    },
 });

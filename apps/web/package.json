@@ -21,11 +21,15 @@
     "reactflow": "^11.11.4",
     "@react-google-maps/api": "^2.20.3",
     "zustand": "^5.0.3",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.0.9",
+    "@turf/helpers": "^7.1.0",
+    "@turf/boolean-point-in-polygon": "^7.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@playwright/test": "^1.50.0",
+    "@types/geojson": "^7946.0.15",
+    "@types/google.maps": "^3.58.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.12.0",

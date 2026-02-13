@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Korea Inbound Trip Planner</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        korea: {
+                            red: '#D93043',
+                            blue: '#00467F',
+                            bg: '#F8FAFC',
+                            surface: '#FFFFFF'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- ✅ BoundaryCanvas (clip tiles to South Korea polygon) -->
+    <script src="https://unpkg.com/leaflet-boundary-canvas@1.0.0/src/BoundaryCanvas.js"></script>
+    <!-- ✅ Turf (point-in-polygon) -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <!-- SortableJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Map & Layout */
+        body, html { height: 100%; overflow: hidden; }
+        .map-container { z-index: 1; }
+        #map { background: #F8FAFC; } /* outside clipped area */
+
+        /* Marker Styles */
+        .custom-marker {
+            background: white;
+            border-radius: 50%;
+            border: 2px solid #00467F;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease;
+        }
+        .custom-marker:hover { transform: scale(1.1); z-index: 1000 !important; }
+        .custom-marker.selected { border-color: #D93043; background: #FFF1F2; }
+        .marker-number { font-weight: 700; font-size: 12px; color: #00467F; }
+
+        /* Animations */
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
+        
+        .timeline-line {
+            position: absolute;
+            left: 24px;
+            top: 30px;
+            bottom: -20px;
+            width: 2px;
+            background-color: #E2E8F0;
+            z-index: 0;
+        }
+        .timeline-item:last-child .timeline-line { display: none; }
+
+        /* Province legend & info controls */
+        .province-legend, .province-info {
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(6px);
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+            padding: 10px 10px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+            font-family: Inter, sans-serif;
+        }
+        .province-legend .title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #0F172A;
+            margin-bottom: 6px;
+        }
+        .province-legend .item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #334155;
+            margin: 2px 0;
+        }
+        .province-legend .swatch {
+            width: 12px; height: 12px;
+            border-radius: 4px;
+            border: 1px solid #CBD5E1;
+            display: inline-block;
+        }
+        .province-info .label {
+            font-size: 10px;
+            font-weight: 600;
+            color: #64748B;
+            margin-bottom: 2px;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .province-info .name {
+            font-size: 12px;
+            font-weight: 800;
+            color: #0F172A;
+            line-height: 1.1;
+        }
+        .province-info .sub {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #475569;
+        }
+        .province-info.clickable { cursor: pointer; }
+        .province-info.clickable:hover { border-color: #94A3B8; }
+    </style>
+</head>
+<body class="bg-korea-bg text-slate-800 flex flex-col md:flex-row h-screen">
+
+    <!-- LEFT: MAP -->
+    <div class="relative w-full md:w-3/5 h-[40vh] md:h-full bg-slate-200 border-r border-slate-200 order-1 md:order-1 group">
+        <div id="map" class="w-full h-full z-10"></div>
+        
+        <!-- Map Controls overlay -->
+        <div class="absolute top-4 left-4 z-[500] bg-white/90 backdrop-blur-sm p-2 rounded-lg shadow-lg border border-slate-100 flex gap-2">
+            <button onclick="app.fitBounds()" class="p-2 hover:bg-slate-100 rounded-md tooltip-trigger" title="Fit Route">
+                <i data-lucide="maximize" class="w-5 h-5 text-slate-600"></i>
+            </button>
+            <div class="h-9 w-px bg-slate-200 mx-1"></div>
+            <div class="flex items-center gap-2 px-2">
+                <span class="w-3 h-3 rounded-full bg-blue-600"></span> <span class="text-xs font-medium">Route</span>
+                <span class="w-3 h-3 rounded-full bg-rose-500 ml-2"></span> <span class="text-xs font-medium">Flight</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: UI PANELS -->
+    <div class="w-full md:w-2/5 h-[60vh] md:h-full bg-white flex flex-col shadow-2xl order-2 md:order-2 z-20 relative">
+        
+        <!-- Header -->
+        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white z-30">
+            <div>
+                <h1 class="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <span class="text-korea-blue">Korea</span><span class="text-korea-red">Plan</span>
+                    <span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-normal">AI Beta</span>
+                </h1>
+                <p class="text-xs text-slate-500 mt-0.5">Drag destinations to build your route</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="app.exportPlan()" class="text-xs font-medium text-slate-600 hover:text-korea-blue px-3 py-1.5 border rounded-full hover:bg-slate-50 transition-colors">
+                    Export JSON
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex border-b border-slate-100">
+            <button onclick="app.switchTab('planner')" id="tab-planner" class="flex-1 py-3 text-sm font-medium border-b-2 border-korea-blue text-korea-blue transition-colors flex justify-center items-center gap-2">
+                <i data-lucide="map" class="w-4 h-4"></i> Itinerary
+            </button>
+            <button onclick="app.switchTab('assistant')" id="tab-assistant" class="flex-1 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors flex justify-center items-center gap-2">
+                <i data-lucide="sparkles" class="w-4 h-4"></i> AI Assistant
+            </button>
+            <button onclick="app.switchTab('explore')" id="tab-explore" class="flex-1 py-3 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors flex justify-center items-center gap-2">
+                <i data-lucide="search" class="w-4 h-4"></i> Explore
+            </button>
+        </div>
+
+        <!-- Content Area -->
+        <div class="flex-1 overflow-y-auto bg-slate-50 relative">
+            
+            <!-- PANEL: ITINERARY -->
+            <div id="panel-planner" class="p-4 space-y-6 pb-20">
+                <div id="itinerary-empty" class="hidden flex flex-col items-center justify-center h-64 text-slate-400">
+                    <i data-lucide="map-pin" class="w-12 h-12 mb-3 opacity-20"></i>
+                    <p class="text-sm">Your itinerary is empty.</p>
+                    <button onclick="app.switchTab('explore')" class="mt-4 text-korea-blue text-sm font-medium hover:underline">Add Destinations</button>
+                </div>
+
+                <div id="itinerary-list" class="space-y-0 relative">
+                    <!-- Items injected here -->
+                </div>
+
+                <!-- Stats Footer -->
+                <div id="trip-stats" class="fixed bottom-0 right-0 w-full md:w-2/5 bg-white border-t border-slate-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-40 flex justify-between items-center text-sm">
+                    <div>
+                        <span class="block text-slate-500 text-xs">Total Distance</span>
+                        <span class="font-bold text-slate-800" id="stat-dist">0 km</span>
+                    </div>
+                    <div>
+                        <span class="block text-slate-500 text-xs">Est. Transit Cost</span>
+                        <span class="font-bold text-slate-800" id="stat-cost">₩0</span>
+                    </div>
+                    <div>
+                        <span class="block text-slate-500 text-xs">Destinations</span>
+                        <span class="font-bold text-slate-800" id="stat-count">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANEL: AI ASSISTANT -->
+            <div id="panel-assistant" class="hidden h-full flex flex-col">
+                <div id="chat-history" class="flex-1 p-4 space-y-4 overflow-y-auto">
+                    <!-- Chat bubbles -->
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                            <i data-lucide="bot" class="w-5 h-5"></i>
+                        </div>
+                        <div class="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-slate-100 max-w-[85%] text-sm text-slate-700">
+                            Hello! I'm your local Korea planner. Tell me what kind of trip you want (e.g., "5 days of food and history in Seoul and Busan" or "Hidden nature spots").
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Suggestions Container (Dynamic) -->
+                <div id="ai-suggestions" class="px-4 py-2 flex gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide"></div>
+
+                <div class="p-4 bg-white border-t border-slate-100">
+                    <form onsubmit="app.handleChat(event)" class="flex gap-2">
+                        <input type="text" id="chat-input" placeholder="Describe your dream trip..." class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-korea-blue/20 focus:border-korea-blue">
+                        <button type="submit" class="bg-korea-blue text-white p-2 rounded-lg hover:bg-blue-800 transition-colors">
+                            <i data-lucide="send" class="w-5 h-5"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- PANEL: EXPLORE -->
+            <div id="panel-explore" class="hidden p-4 space-y-4">
+                <!-- Search & Filters -->
+                <div class="sticky top-0 bg-slate-50 pt-2 pb-4 z-10 space-y-3">
+                    <div class="relative">
+                        <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-slate-400"></i>
+                        <input type="text" id="explore-search" placeholder="Search POIs (TourAPI)..." oninput="app.filterExplore()" 
+                            class="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-korea-blue">
+                    </div>
+                    <div id="explore-source" class="text-xs text-slate-500 -mt-1">
+                      Source: -
+                    </div>
+                    <div class="flex flex-wrap gap-2" id="category-chips">
+                        <!-- Chips injected JS -->
+                    </div>
+                </div>
+
+                <div id="explore-list" class="grid grid-cols-1 gap-3 pb-20">
+                    <!-- Explore items -->
+                </div>
+
+                <div class="text-[11px] text-slate-400 pb-4">
+                    Tip: Explore uses TourAPI (KTO). If you open via <code>file://</code>, fetch may fail. Run a local server:
+                    <code>python -m http.server 8000</code>.
+                    Also, some public APIs may require a backend proxy if CORS blocks browser calls.
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // ✅ Provinces GeoJSON URL (시도 경계)
+        const KOREA_PROVINCES_GEOJSON_URL =
+          "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_provinces_geo_simple.json";
+
+        const BASE_TILE_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+
+        // ==========================
+        // ✅ TourAPI (KTO) config
+        // ==========================
+        // 1) data.go.kr에서 TourAPI 서비스키를 발급받아 여기에 넣으세요.
+        // 2) 가능하면 "Decoding" 키를 권장(이미 인코딩된 키(% 포함)여도 동작하도록 처리해둠).
+        // 3) 브라우저 CORS에 막히면: 백엔드 프록시(서버)로 우회가 필요할 수 있습니다.
+        const TOUR_API = {
+            serviceKey: "289e049112f208b4442c587ffc0300f111147ef8342992ccd59098e48282f852",
+            // 인바운드 UX면 EngService2 추천. (한국어면 KorService2로 바꿔도 됨)
+            baseUrl: "https://apis.data.go.kr/B551011/EngService2",
+            mobileOS: "ETC",
+            mobileApp: "KoreaPlan",
+            type: "json"
+        };
+
+        // UI에서 쓰는 카테고리(칩) + TourAPI contentTypeId 매핑
+        const TOUR_CONTENT_TYPE = {
+            All: null,
+            Attractions: 12,
+            Culture: 14,
+            Events: 15,
+            Course: 25,
+            Leisure: 28,
+            Stay: 32,
+            Shopping: 38,
+            Food: 39 // 음식점
+        };
+
+        const UI_CATEGORIES = ["All", "Attractions", "Culture", "Events", "Course", "Leisure", "Stay", "Shopping", "Food"];
+
+        // --- helpers ---
+        function _asArray(x) { return !x ? [] : (Array.isArray(x) ? x : [x]); }
+
+        function _haversineMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const toRad = (d) => (d * Math.PI) / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a =
+                Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function _encodeServiceKeyMaybe(key) {
+            const k = String(key || "").trim();
+            if (!k) return "";
+            if (k.includes("%")) return k; // already encoded
+            return encodeURIComponent(k);
+        }
+
+        function _buildTourUrl(path, params) {
+            const base = `${TOUR_API.baseUrl}/${path}`;
+            const all = {
+                serviceKey: TOUR_API.serviceKey,
+                MobileOS: TOUR_API.mobileOS,
+                MobileApp: TOUR_API.mobileApp,
+                _type: TOUR_API.type,
+                ...params
+            };
+
+            const qs = [];
+            for (const [k, v] of Object.entries(all)) {
+                if (v === undefined || v === null || v === "") continue;
+
+                if (k === "serviceKey") {
+                    const safeKey = _encodeServiceKeyMaybe(v);
+                    qs.push(`serviceKey=${safeKey}`);
+                    continue;
+                }
+                qs.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+            }
+            return `${base}?${qs.join("&")}`;
+        }
+
+        async function _tourFetch(path, params) {
+            const url = _buildTourUrl(path, params);
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`TourAPI HTTP ${res.status}`);
+
+            const data = await res.json();
+
+            // ✅ TourAPI는 HTTP 200이어도 header.resultCode로 실패를 알려주는 경우가 많음
+            const rc = String(data?.response?.header?.resultCode || "");
+            const msg = String(data?.response?.header?.resultMsg || "");
+            if (rc && rc !== "0000") {
+                throw new Error(`TourAPI error ${rc}: ${msg}`);
+            }
+
+            return data;
+        }
+
+
+        function _tourItems(data) {
+            return _asArray(data?.response?.body?.items?.item);
+        }
+
+        function _emojiForType(contentTypeId) {
+            const t = Number(contentTypeId);
+            if (t === 39) return "🍜";
+            if (t === 38) return "🛍️";
+            if (t === 32) return "🏨";
+            if (t === 28) return "🎿";
+            if (t === 25) return "🧭";
+            if (t === 15) return "🎉";
+            if (t === 14) return "🏛️";
+            return "📍";
+        }
+
+        function _typeLabel(contentTypeId) {
+            const t = Number(contentTypeId);
+            if (t === 39) return "Food";
+            if (t === 38) return "Shopping";
+            if (t === 32) return "Stay";
+            if (t === 28) return "Leisure";
+            if (t === 25) return "Course";
+            if (t === 15) return "Events";
+            if (t === 14) return "Culture";
+            return "Attractions";
+        }
+
+        // 기존 로컬 DESTINATIONS category를 UI_CATEGORIES로 대충 매핑(키가 없을 때도 필터가 자연스럽게 동작)
+        function _localCategoryToUICat(localCat) {
+            const c = String(localCat || "").toLowerCase();
+            if (c.includes("food")) return "Food";
+            if (c.includes("culture") || c.includes("history") || c.includes("art")) return "Culture";
+            if (c.includes("hiking") || c.includes("adventure") || c.includes("nature") || c.includes("beach") || c.includes("views") || c.includes("nightlife") || c.includes("relax")) return "Leisure";
+            if (c.includes("transport")) return "Attractions";
+            return "Attractions";
+        }
+
+        function _normalizeTourItem(item) {
+            const contentId = item?.contentid;
+            const contentTypeId = item?.contenttypeid;
+
+            const lat = parseFloat(item?.mapy);
+            const lng = parseFloat(item?.mapx);
+            if (!contentId || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+            return {
+                id: `tour:${contentId}`,
+                name: item?.title || "Unknown",
+                ko: item?.title || "",
+                lat, lng,
+                region: item?.addr1 || item?.addr2 || "",
+                category: _typeLabel(contentTypeId),
+                crowd: 3,      // ✅ placeholder (진짜 "관광객 밀도" 데이터 붙이면 여기/별도 로직에서 교체)
+                duration: 2,   // placeholder
+                desc: item?.addr1 || "",
+                img: _emojiForType(contentTypeId),
+
+                source: {
+                    provider: "tourapi",
+                    contentId: String(contentId),
+                    contentTypeId: String(contentTypeId || "")
+                },
+                imageUrl: item?.firstimage || item?.firstimage2 || "",
+                tel: item?.tel || ""
+            };
+        }
+
+        // --- DATASET (local fallback + demo) ---
+        const DESTINATIONS = [
+            // SEOUL & GYEONGGI
+            { id: 'seoul-palace', name: 'Gyeongbokgung Palace', ko: '경복궁', lat: 37.5796, lng: 126.9770, region: 'Seoul', category: 'History', crowd: 5, duration: 2, desc: 'Main royal palace of the Joseon dynasty.', img: '🏯' },
+            { id: 'seoul-tower', name: 'N Seoul Tower', ko: '남산타워', lat: 37.5512, lng: 126.9882, region: 'Seoul', category: 'Views', crowd: 5, duration: 2, desc: 'Iconic tower offering panoramic city views.', img: '🗼' },
+            { id: 'seoul-bukchon', name: 'Bukchon Hanok Village', ko: '북촌한옥마을', lat: 37.5826, lng: 126.9850, region: 'Seoul', category: 'Culture', crowd: 4, duration: 1.5, desc: 'Traditional Korean village in the city center.', img: '🏘️' },
+            { id: 'seoul-hongdae', name: 'Hongdae Street', ko: '홍대', lat: 37.5563, lng: 126.9224, region: 'Seoul', category: 'Nightlife', crowd: 5, duration: 4, desc: 'Youth culture, busking, and nightlife hub.', img: '🎸' },
+            { id: 'suwon-fortress', name: 'Suwon Hwaseong Fortress', ko: '수원 화성', lat: 37.2851, lng: 127.0089, region: 'Gyeonggi', category: 'History', crowd: 3, duration: 3, desc: 'UNESCO Heritage massive fortress walls.', img: '🏰' },
+            { id: 'incheon-airport', name: 'Incheon Int. Airport', ko: '인천공항', lat: 37.4602, lng: 126.4407, region: 'Incheon', category: 'Transport', crowd: 5, duration: 1, desc: 'World-class airport gateway.', img: '✈️' },
+            
+            // GANGWON (Nature)
+            { id: 'nami-island', name: 'Nami Island', ko: '남이섬', lat: 37.7915, lng: 127.5255, region: 'Gangwon', category: 'Nature', crowd: 4, duration: 3, desc: 'Famous tree-lined paths and ferry ride.', img: '🌲' },
+            { id: 'seoraksan', name: 'Seoraksan National Park', ko: '설악산', lat: 38.1190, lng: 128.4655, region: 'Gangwon', category: 'Hiking', crowd: 4, duration: 5, desc: 'Breathtaking peaks and fall foliage.', img: '⛰️' },
+            { id: 'sokcho-market', name: 'Sokcho Tourist Market', ko: '속초중앙시장', lat: 38.2030, lng: 128.5910, region: 'Gangwon', category: 'Food', crowd: 4, duration: 1.5, desc: 'Famous for dakgangjeong (sweet chicken).', img: '🍗' },
+            { id: 'gangneung-coffee', name: 'Anmok Coffee Street', ko: '안목해변', lat: 37.7719, lng: 128.9483, region: 'Gangwon', category: 'Beach', crowd: 3, duration: 2, desc: 'Seaside street lined with coffee shops.', img: '☕' },
+
+            // BUSAN & GYEONGSANG
+            { id: 'busan-haeundae', name: 'Haeundae Beach', ko: '해운대', lat: 35.1587, lng: 129.1603, region: 'Busan', category: 'Beach', crowd: 5, duration: 3, desc: 'Korea’s most famous beach.', img: '🏖️' },
+            { id: 'busan-gamcheon', name: 'Gamcheon Culture Village', ko: '감천문화마을', lat: 35.0975, lng: 129.0106, region: 'Busan', category: 'Art', crowd: 4, duration: 2, desc: 'Colorful houses on a hillside.', img: '🎨' },
+            { id: 'gyeongju-daereungwon', name: 'Daereungwon Tombs', ko: '대릉원', lat: 35.8392, lng: 129.2107, region: 'Gyeongju', category: 'History', crowd: 3, duration: 2, desc: 'Ancient royal tombs in park setting.', img: '⚰️' },
+            { id: 'gyeongju-bulguksa', name: 'Bulguksa Temple', ko: '불국사', lat: 35.7905, lng: 129.3321, region: 'Gyeongju', category: 'History', crowd: 4, duration: 2, desc: 'Representative temple of Buddhist art.', img: '⛩️' },
+            { id: 'andong-hahoe', name: 'Hahoe Folk Village', ko: '하회마을', lat: 36.5385, lng: 128.5190, region: 'Andong', category: 'Culture', crowd: 2, duration: 3, desc: 'Traditional clan village, mask dance.', img: '🎭' },
+            { id: 'geoje-windy', name: 'Windy Hill', ko: '바람의 언덕', lat: 34.7438, lng: 128.6657, region: 'Geoje', category: 'Nature', crowd: 3, duration: 1.5, desc: 'Scenic windmill overlooking the sea.', img: '🌬️' },
+
+            // JEOLLA (Food & Tradition)
+            { id: 'jeonju-hanok', name: 'Jeonju Hanok Village', ko: '전주한옥마을', lat: 35.8147, lng: 127.1526, region: 'Jeolla', category: 'Food', crowd: 4, duration: 3, desc: 'Birthplace of Bibimbap.', img: '🍛' },
+            { id: 'suncheon-bay', name: 'Suncheon Bay Wetland', ko: '순천만', lat: 34.9304, lng: 127.5056, region: 'Jeolla', category: 'Nature', crowd: 3, duration: 3, desc: 'Vast reed fields and migratory birds.', img: '🌾' },
+            { id: 'boseong-tea', name: 'Boseong Green Tea Fields', ko: '보성녹차밭', lat: 34.7176, lng: 127.0805, region: 'Jeolla', category: 'Nature', crowd: 2, duration: 2, desc: 'Terraced tea plantations.', img: '🍵' },
+
+            // JEJU ISLAND
+            { id: 'jeju-seongsan', name: 'Seongsan Ilchulbong', ko: '성산일출봉', lat: 33.4581, lng: 126.9426, region: 'Jeju', category: 'Nature', crowd: 5, duration: 2.5, desc: 'Tuff cone crater rising from the sea.', img: '🌋' },
+            { id: 'jeju-hamdeok', name: 'Hamdeok Beach', ko: '함덕해변', lat: 33.5434, lng: 126.6692, region: 'Jeju', category: 'Beach', crowd: 4, duration: 3, desc: 'Emerald waters and white sand.', img: '🏝️' },
+            { id: 'jeju-hallasan', name: 'Hallasan Mountain', ko: '한라산', lat: 33.3617, lng: 126.5292, region: 'Jeju', category: 'Hiking', crowd: 3, duration: 6, desc: 'Highest mountain in South Korea.', img: '🏔️' },
+            { id: 'jeju-osulloc', name: 'Osulloc Tea Museum', ko: '오설록', lat: 33.3068, lng: 126.2894, region: 'Jeju', category: 'Relax', crowd: 4, duration: 1.5, desc: 'Tea fields and modern architecture.', img: '🌿' },
+            
+            // HIDDEN GEMS / OTHERS
+            { id: 'danyang-paragliding', name: 'Danyang Paragliding', ko: '단양', lat: 36.9910, lng: 128.3710, region: 'Chungcheong', category: 'Adventure', crowd: 2, duration: 3, desc: 'Scenic paragliding over river bends.', img: '🪂' },
+            { id: 'pohang-spacewalk', name: 'Pohang Space Walk', ko: '스페이스워크', lat: 36.0594, lng: 129.3789, region: 'Gyeongsang', category: 'Views', crowd: 4, duration: 1, desc: 'Rollercoaster-like walkable track.', img: '🎢' }
+        ];
+
+        // --- APP STATE & LOGIC ---
+        const app = {
+            map: null,
+            markers: {},
+            routeLine: null,
+            itinerary: [],
+            filterCat: 'All',
+            activeTab: 'planner',
+
+            // ✅ Dynamic POI store (TourAPI upsert)
+            destIndex: new Map(),       // id -> destination
+            dynamicDestIds: new Set(),  // tour:* ids
+            exploreResults: [],         // current Explore results (API)
+            isExploreLoading: false,
+            _debouncedExplore: null,
+            SK_BOUNDS: null,
+
+            // ✅ Province overlay + filtering state
+            provincesGeo: null,
+            provinceLayer: null,
+            provinceDensity: null,
+            selectedProvince: null,
+            provinceFilteredIds: null,
+            provinceLegendControl: null,
+            provinceInfoControl: null,
+            _provinceInfoDiv: null,
+            _provinceStyleFn: null,
+
+            // --- init ---
+            async init() {
+                // 1) index local data
+                this.destIndex = new Map();
+                DESTINATIONS.forEach(d => this.destIndex.set(d.id, d));
+
+                // 2) debounce for Explore typing
+                this._debouncedExplore = this.debounce(() => {
+                    if (this.activeTab === 'explore') this.refreshExploreFromAPI();
+                }, 350);
+
+                // 3) init map (includes province overlay)
+                await this.initMap();
+
+                // 4) render UI
+                this.renderCategories();
+                this.renderExplore();
+                this.initSortable();
+                this.initChat();
+
+                // demo initial itinerary
+                this.addToItinerary('incheon-airport', false);
+                this.addToItinerary('seoul-palace', false);
+                this.updateUI();
+
+                // preload explore from API (non-blocking)
+                this.refreshExploreFromAPI().catch(console.error);
+
+                lucide.createIcons();
+            },
+
+            debounce(fn, wait=300) {
+                let t = null;
+                return (...args) => {
+                    clearTimeout(t);
+                    t = setTimeout(() => fn(...args), wait);
+                };
+            },
+
+            isWithinKorea(lat, lng) {
+                if (!this.SK_BOUNDS) return true;
+                const sw = this.SK_BOUNDS.getSouthWest();
+                const ne = this.SK_BOUNDS.getNorthEast();
+                return lat >= sw.lat && lat <= ne.lat && lng >= sw.lng && lng <= ne.lng;
+            },
+
+            // --- Province helper ---
+            getProvinceName(props = {}) {
+                return (
+                    props.name ||
+                    props.NAME_1 || props.NAME || props.NAME_EN ||
+                    props.CTP_ENG_NM || props.CTP_KOR_NM ||
+                    props.sido || props.sigungu ||
+                    "Unknown"
+                );
+            },
+
+            getChoroColor(v) {
+                if (v >= 80) return "#b91c1c";
+                if (v >= 60) return "#ef4444";
+                if (v >= 40) return "#f59e0b";
+                if (v >= 20) return "#fbbf24";
+                if (v > 0)  return "#34d399";
+                return "#e2e8f0";
+            },
+
+            getAllDestinationsArray() {
+                return Array.from(this.destIndex.values());
+            },
+
+            computeProvinceDensity(provincesGeo) {
+                if (typeof turf === "undefined" || !provincesGeo?.features?.length) return {};
+                const sums = {};
+                provincesGeo.features.forEach(f => {
+                    const name = this.getProvinceName(f.properties || {});
+                    sums[name] = 0;
+                });
+
+                // ✅ now uses ALL known destinations (local + TourAPI upserts)
+                const all = this.getAllDestinationsArray();
+
+                all.forEach(d => {
+                    if (!Number.isFinite(d.lat) || !Number.isFinite(d.lng)) return;
+                    const pt = turf.point([d.lng, d.lat]);
+                    for (const f of provincesGeo.features) {
+                        if (turf.booleanPointInPolygon(pt, f)) {
+                            const name = this.getProvinceName(f.properties || {});
+                            sums[name] = (sums[name] || 0) + (d.crowd || 1);
+                            break;
+                        }
+                    }
+                });
+
+                const maxSum = Math.max(0, ...Object.values(sums));
+                const out = {};
+                for (const [k, s] of Object.entries(sums)) out[k] = maxSum > 0 ? Math.round((s / maxSum) * 100) : 0;
+                return out;
+            },
+
+            refreshProvinceDensity() {
+                if (!this.provincesGeo || !this.provinceLayer || !this._provinceStyleFn) return;
+                this.provinceDensity = this.computeProvinceDensity(this.provincesGeo);
+                this.provinceLayer.setStyle(this._provinceStyleFn);
+                this.updateProvinceInfo();
+            },
+
+            applyProvinceFilter(featureOrNull) {
+                if (typeof turf === "undefined") return;
+
+                if (!featureOrNull || !this.selectedProvince) {
+                    this.provinceFilteredIds = null;
+                    this.renderExplore();
+                    this.renderMarkers();
+                    return;
+                }
+
+                const poly = featureOrNull;
+                const set = new Set();
+                // ✅ filter all known destinations (local + TourAPI)
+                for (const d of this.destIndex.values()) {
+                    const pt = turf.point([d.lng, d.lat]);
+                    if (turf.booleanPointInPolygon(pt, poly)) set.add(d.id);
+                }
+
+                this.provinceFilteredIds = set;
+                this.renderExplore();
+                this.renderMarkers();
+            },
+
+            clearProvinceSelection() {
+                this.selectedProvince = null;
+                this.provinceFilteredIds = null;
+                if (this.provinceLayer && this._provinceStyleFn) this.provinceLayer.setStyle(this._provinceStyleFn);
+                this.updateProvinceInfo();
+                this.renderExplore();
+                this.renderMarkers();
+                this.map.setView([36.3, 127.8], 7);
+            },
+
+            addProvinceLegend() {
+                if (!this.map) return;
+                if (this.provinceLegendControl) this.provinceLegendControl.remove();
+
+                const legend = L.control({ position: "bottomright" });
+                legend.onAdd = () => {
+                    const div = L.DomUtil.create("div", "province-legend");
+                    const grades = [0, 20, 40, 60, 80];
+                    div.innerHTML = `<div class="title">Density (demo)</div>` + grades.map((g, i) => {
+                        const from = grades[i];
+                        const to = grades[i + 1];
+                        const label = to != null ? `${from}–${to}` : `${from}+`;
+                        const color = this.getChoroColor(from + 1);
+                        return `<div class="item"><span class="swatch" style="background:${color}"></span><span>${label}</span></div>`;
+                    }).join("");
+                    return div;
+                };
+
+                legend.addTo(this.map);
+                this.provinceLegendControl = legend;
+            },
+
+            addProvinceInfoControl() {
+                if (!this.map) return;
+                if (this.provinceInfoControl) this.provinceInfoControl.remove();
+
+                const ctrl = L.control({ position: "topright" });
+                ctrl.onAdd = () => {
+                    const div = L.DomUtil.create("div", "province-info");
+                    this._provinceInfoDiv = div;
+
+                    L.DomEvent.disableClickPropagation(div);
+                    L.DomEvent.disableScrollPropagation(div);
+
+                    div.addEventListener("click", () => {
+                        if (this.selectedProvince) this.clearProvinceSelection();
+                    });
+
+                    this.updateProvinceInfo();
+                    return div;
+                };
+
+                ctrl.addTo(this.map);
+                this.provinceInfoControl = ctrl;
+            },
+
+            updateProvinceInfo() {
+                if (!this._provinceInfoDiv) return;
+
+                if (this.selectedProvince) {
+                    const v = this.provinceDensity?.[this.selectedProvince] ?? 0;
+                    this._provinceInfoDiv.classList.add("clickable");
+                    this._provinceInfoDiv.innerHTML = `
+                        <div class="label">Selected</div>
+                        <div class="name">${this.selectedProvince}</div>
+                        <div class="sub">${v} / 100 • click to clear</div>
+                    `;
+                } else {
+                    this._provinceInfoDiv.classList.remove("clickable");
+                    this._provinceInfoDiv.innerHTML = `
+                        <div class="label">Selected</div>
+                        <div class="name">All provinces</div>
+                        <div class="sub">Click a province</div>
+                    `;
+                }
+            },
+
+            // --- MAP ---
+            async initMap() {
+                this.map = L.map('map', { zoomControl: false, worldCopyJump: false }).setView([36.3, 127.8], 7);
+                L.control.zoom({ position: 'bottomleft' }).addTo(this.map);
+
+                // Korea bounds (rough incl. Jeju)
+                const SK_BOUNDS = L.latLngBounds([33.0, 124.5], [38.9, 131.2]);
+                this.SK_BOUNDS = SK_BOUNDS;
+                this.map.setMaxBounds(SK_BOUNDS);
+                this.map.options.maxBoundsViscosity = 1.0;
+                this.map.setMinZoom(6);
+
+                // Load provinces GeoJSON
+                let provincesGeo = null;
+                try {
+                    const res = await fetch(KOREA_PROVINCES_GEOJSON_URL);
+                    provincesGeo = await res.json();
+                    this.provincesGeo = provincesGeo;
+                } catch (e) {
+                    console.warn("Failed to load provinces GeoJSON. Falling back to normal tiles.", e);
+                }
+
+                const tileOptions = {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                    subdomains: 'abcd',
+                    maxZoom: 19,
+                    crossOrigin: true,
+                    noWrap: true
+                };
+
+                const boundaryFactory =
+                    (L.tileLayer && L.tileLayer.boundaryCanvas) ? L.tileLayer.boundaryCanvas :
+                    (L.TileLayer && L.TileLayer.boundaryCanvas) ? L.TileLayer.boundaryCanvas :
+                    null;
+
+                if (provincesGeo && boundaryFactory) {
+                    boundaryFactory(BASE_TILE_URL, { ...tileOptions, boundary: provincesGeo }).addTo(this.map);
+                    this.initProvinceLayer(provincesGeo);
+                } else {
+                    L.tileLayer(BASE_TILE_URL, tileOptions).addTo(this.map);
+                }
+
+                // ✅ map move -> refresh Explore (when Explore tab active)
+                const refresh = this.debounce(() => {
+                    if (this.activeTab === 'explore') this.refreshExploreFromAPI();
+                }, 450);
+
+                this.map.on('moveend zoomend', refresh);
+            },
+
+            initProvinceLayer(provincesGeo) {
+                this.selectedProvince = null;
+                this.provinceFilteredIds = null;
+
+                this.provinceDensity = this.computeProvinceDensity(provincesGeo);
+
+                const style = (feature) => {
+                    const name = this.getProvinceName(feature.properties || {});
+                    const v = this.provinceDensity?.[name] ?? 0;
+                    const isSelected = (this.selectedProvince === name);
+
+                    return {
+                        color: isSelected ? "#0f172a" : "#334155",
+                        weight: isSelected ? 2.5 : 1,
+                        fillColor: this.getChoroColor(v),
+                        fillOpacity: isSelected ? 0.28 : 0.18,
+                        opacity: 0.95
+                    };
+                };
+                this._provinceStyleFn = style;
+
+                const highlight = (layer) => {
+                    layer.setStyle({ weight: 2.5, fillOpacity: 0.30 });
+                    try { layer.bringToFront(); } catch (_) {}
+                };
+
+                const reset = (layer, feature) => {
+                    const name = this.getProvinceName(feature.properties || {});
+                    if (this.selectedProvince === name) return;
+                    this.provinceLayer.resetStyle(layer);
+                };
+
+                const onEach = (feature, layer) => {
+                    const name = this.getProvinceName(feature.properties || {});
+                    layer.on({
+                        mouseover: (e) => highlight(e.target),
+                        mouseout:  (e) => reset(e.target, feature),
+                        click:     (e) => {
+                            const willSelect = (this.selectedProvince !== name);
+                            this.selectedProvince = willSelect ? name : null;
+
+                            this.provinceLayer.setStyle(style);
+                            this.updateProvinceInfo();
+
+                            if (this.selectedProvince) {
+                                this.applyProvinceFilter(feature);
+                                this.map.fitBounds(layer.getBounds().pad(0.06));
+                            } else {
+                                this.applyProvinceFilter(null);
+                                this.map.setView([36.3, 127.8], 7);
+                            }
+                        }
+                    });
+
+                    const v = this.provinceDensity?.[name] ?? 0;
+                    layer.bindTooltip(`<b>${name}</b><br/><span style="font-size:11px;color:#475569;">Density: ${v}/100</span>`, { sticky: true });
+                };
+
+                this.map.createPane("provinces");
+                this.map.getPane("provinces").style.zIndex = 350;
+
+                this.provinceLayer = L.geoJSON(provincesGeo, {
+                    pane: "provinces",
+                    style,
+                    onEachFeature: onEach
+                }).addTo(this.map);
+
+                this.addProvinceLegend();
+                this.addProvinceInfoControl();
+            },
+
+            // --- MARKERS ---
+            renderMarkers() {
+                Object.values(this.markers).forEach(m => this.map.removeLayer(m));
+                this.markers = {};
+
+                const allowNonItinerary = (id) => !this.provinceFilteredIds || this.provinceFilteredIds.has(id);
+
+                // ✅ keep map clean:
+                // - always show itinerary
+                // - always show local demo points
+                // - show current Explore API results
+                const visibleIds = new Set();
+                this.itinerary.forEach(id => visibleIds.add(id));
+                DESTINATIONS.forEach(d => visibleIds.add(d.id));
+                (this.exploreResults || []).forEach(d => visibleIds.add(d.id));
+
+                for (const id of visibleIds) {
+                    const dest = this.destIndex.get(id);
+                    if (!dest) continue;
+
+                    const index = this.itinerary.indexOf(dest.id);
+                    const isSelected = index > -1;
+
+                    if (!isSelected && !allowNonItinerary(dest.id)) continue;
+
+                    const iconHtml = isSelected 
+                        ? `<div class="custom-marker selected w-8 h-8"><span class="marker-number">${index + 1}</span></div>`
+                        : `<div class="w-2 h-2 rounded-full bg-slate-400 border border-white shadow-sm opacity-60 hover:w-4 hover:h-4 hover:opacity-100 transition-all"></div>`;
+
+                    const icon = L.divIcon({
+                        className: 'bg-transparent',
+                        html: iconHtml,
+                        iconSize: isSelected ? [32, 32] : [8, 8],
+                        iconAnchor: isSelected ? [16, 16] : [4, 4]
+                    });
+
+                    const marker = L.marker([dest.lat, dest.lng], { icon })
+                        .addTo(this.map)
+                        .bindTooltip(`
+                            <div class="font-bold text-sm">${dest.name}</div>
+                            <div class="text-xs text-slate-500">${dest.category || ''}</div>
+                        `, { direction: 'top', offset: [0, -10] });
+                        
+                    marker.on('click', () => {
+                        if (!isSelected) this.addToItinerary(dest.id);
+                    });
+
+                    this.markers[dest.id] = marker;
+                }
+            },
+
+            // --- ROUTE ---
+            drawRoute() {
+                if (this.routeLine) this.map.removeLayer(this.routeLine);
+                if (this.itinerary.length < 2) return;
+
+                const latlngs = this.itinerary
+                    .map(id => this.destIndex.get(id))
+                    .filter(Boolean)
+                    .map(d => [d.lat, d.lng]);
+
+                if (latlngs.length < 2) return;
+
+                this.routeLine = L.polyline(latlngs, {
+                    color: '#00467F',
+                    weight: 3,
+                    opacity: 0.8,
+                    lineJoin: 'round',
+                    dashArray: '5, 10',
+                    className: 'animate-draw'
+                }).addTo(this.map);
+            },
+
+            fitBounds() {
+                if (this.itinerary.length > 0) {
+                    const latlngs = this.itinerary
+                        .map(id => this.destIndex.get(id))
+                        .filter(Boolean)
+                        .map(d => [d.lat, d.lng]);
+
+                    if (latlngs.length) this.map.fitBounds(L.latLngBounds(latlngs).pad(0.1));
+                } else {
+                    this.map.setView([36.3, 127.8], 7);
+                }
+            },
+
+            // --- ITINERARY ---
+            addToItinerary(id, animate = true) {
+                if (this.itinerary.includes(id)) {
+                    alert("Already in itinerary!");
+                    return;
+                }
+                if (!this.destIndex.has(id)) {
+                    alert("Unknown destination id (not in index yet).");
+                    return;
+                }
+                this.itinerary.push(id);
+                this.updateUI();
+                if (animate) this.fitBounds();
+                this.switchTab('planner');
+            },
+
+            removeFromItinerary(id) {
+                this.itinerary = this.itinerary.filter(x => x !== id);
+                this.updateUI();
+            },
+
+            updateUI() {
+                this.renderItinerary();
+                this.renderMarkers();
+                this.drawRoute();
+                
+                const emptyState = document.getElementById('itinerary-empty');
+                emptyState.style.display = this.itinerary.length === 0 ? 'flex' : 'none';
+            },
+
+            // --- Transport (still heuristic; plug real routing later) ---
+            getTransportInfo(from, to) {
+                const R = 6371; // km
+                const dLat = (to.lat - from.lat) * Math.PI / 180;
+                const dLon = (to.lng - from.lng) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                        Math.cos(from.lat * Math.PI / 180) * Math.cos(to.lat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                const dist = Math.round(R * c);
+
+                let mode = 'Bus/Car';
+                let icon = 'car';
+                let time = Math.round(dist / 60 * 60); // 60km/h avg
+                let cost = dist * 150;
+
+                const fromRegion = String(from.region || "").toLowerCase();
+                const toRegion = String(to.region || "").toLowerCase();
+                const isIsland = fromRegion.includes('jeju') || toRegion.includes('jeju');
+
+                if (isIsland) {
+                    mode = 'Flight';
+                    icon = 'plane';
+                    time = 60 + 90;
+                    cost = 70000;
+                } else if (dist > 150) {
+                    mode = 'KTX Train';
+                    icon = 'train';
+                    time = Math.round((dist / 180 * 60) + 40);
+                    cost = dist * 160;
+                }
+
+                const h = Math.floor(time / 60);
+                const m = time % 60;
+                const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+
+                return { dist, mode, icon, timeStr, cost, warning: isIsland && dist < 50 ? "Ferry required" : null };
+            },
+
+            renderItinerary() {
+                const list = document.getElementById('itinerary-list');
+                list.innerHTML = '';
+
+                let totalDist = 0;
+                let totalCost = 0;
+
+                this.itinerary.forEach((id, index) => {
+                    const place = this.destIndex.get(id);
+                    if (!place) return;
+
+                    if (index > 0) {
+                        const prev = this.destIndex.get(this.itinerary[index - 1]);
+                        if (prev) {
+                            const transport = this.getTransportInfo(prev, place);
+                            totalDist += transport.dist;
+                            totalCost += transport.cost;
+
+                            const connector = document.createElement('div');
+                            connector.className = 'relative pl-8 py-4 timeline-item';
+                            connector.innerHTML = `
+                                <div class="timeline-line"></div>
+                                <div class="bg-slate-100 rounded-lg p-3 text-sm flex items-center justify-between border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer group">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-600 shadow-sm">
+                                            <i data-lucide="${transport.icon}" class="w-4 h-4"></i>
+                                        </div>
+                                        <div>
+                                            <div class="font-semibold text-slate-700">${transport.mode}</div>
+                                            <div class="text-xs text-slate-500">${transport.dist} km • ${transport.timeStr}</div>
+                                        </div>
+                                    </div>
+                                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:text-slate-600"></i>
+                                </div>
+                            `;
+                            list.appendChild(connector);
+                        }
+                    }
+
+                    const item = document.createElement('div');
+                    item.className = 'relative pl-8 timeline-item animate-slide-in';
+                    item.dataset.id = id;
+
+                    const emojiOrImg = place.imageUrl
+                        ? `<img src="${place.imageUrl}" alt="" class="w-10 h-10 rounded-lg object-cover bg-slate-50" loading="lazy" />`
+                        : `<div class="text-2xl">${place.img || '📍'}</div>`;
+
+                    item.innerHTML = `
+                        <div class="timeline-line"></div>
+                        <div class="absolute left-0 top-1/2 -translate-y-1/2 w-12 flex justify-center z-10">
+                            <div class="w-6 h-6 rounded-full bg-korea-blue text-white flex items-center justify-center text-xs font-bold border-2 border-white shadow-md">
+                                ${index + 1}
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 hover:shadow-md transition-shadow group">
+                            <div class="flex justify-between items-start">
+                                <div class="flex gap-3">
+                                    ${emojiOrImg}
+                                    <div>
+                                        <h3 class="font-bold text-slate-800 text-sm leading-tight">${place.name}</h3>
+                                        <div class="text-xs text-slate-500 mt-1">${place.ko || ''} • ${place.region || ''}</div>
+                                        <div class="flex gap-2 mt-2">
+                                            <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">${place.category || ''}</span>
+                                            <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${place.duration || 2}h</span>
+                                            ${place.tel ? `<span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">☎ ${place.tel}</span>` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onclick="app.removeFromItinerary('${place.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-1">
+                                    <i data-lucide="x" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="mt-3 text-xs text-slate-500 line-clamp-2 bg-slate-50 p-2 rounded">
+                                ${place.desc || ''}
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+
+                document.getElementById('stat-dist').innerText = `${totalDist} km`;
+                document.getElementById('stat-count').innerText = this.itinerary.length;
+                document.getElementById('stat-cost').innerText = `₩${(totalCost/1000).toFixed(0)}k`;
+                
+                lucide.createIcons();
+            },
+
+            // --- Explore (API-first) ---
+            renderExplore() {
+                const list = document.getElementById('explore-list');
+                const search = (document.getElementById('explore-search')?.value || "").toLowerCase().trim();
+                list.innerHTML = '';
+
+                // Loading skeleton
+                if (this.isExploreLoading) {
+                    list.innerHTML = Array.from({length: 10}).map(() => `
+                        <div class="p-3 bg-white rounded-xl border border-slate-100 shadow-sm animate-pulse">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-slate-100 rounded-lg"></div>
+                                <div class="flex-1">
+                                    <div class="h-3 bg-slate-100 rounded w-2/3"></div>
+                                    <div class="h-2 bg-slate-100 rounded w-1/3 mt-2"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    return;
+                }
+
+                // Prefer API results; fallback to local list
+                const hasKey = TOUR_API.serviceKey && !TOUR_API.serviceKey.includes("PUT_YOUR_SERVICE_KEY");
+
+                let items;
+                let usingApi = false;
+
+                // ✅ 키가 있으면: 결과가 0개여도 "API 결과(0개)"를 그대로 보여줌 (착시 제거)
+                if (hasKey) {
+                    items = this.exploreResults || [];
+                    usingApi = true;
+                } else {
+                    items = null;
+                }
+
+                if (!usingApi) {
+                    // local fallback respects UI_CATEGORIES mapping
+                    items = DESTINATIONS.filter(d => {
+                        const uiCat = _localCategoryToUICat(d.category);
+                        const matchesCat = this.filterCat === 'All' || uiCat === this.filterCat;
+                        const matchesSearch = !search || d.name.toLowerCase().includes(search) || String(d.region||'').toLowerCase().includes(search);
+                        const matchesProvince = !this.provinceFilteredIds || this.provinceFilteredIds.has(d.id);
+                        return matchesCat && matchesSearch && matchesProvince;
+                    });
+                } else {
+                    // API list still respects province selection
+                    if (this.provinceFilteredIds) items = items.filter(d => this.provinceFilteredIds.has(d.id));
+                    // client-side search refinement
+                    if (search) items = items.filter(d => (d.name||'').toLowerCase().includes(search) || (d.region||'').toLowerCase().includes(search));
+                }
+
+                if (!items.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'text-sm text-slate-500 bg-white border border-slate-100 rounded-xl p-4';
+                    empty.innerHTML = this.provinceFilteredIds
+                        ? `No results in the selected province. (Try clearing selection on the top-right control.)`
+                        : `No results. Try another search or zoom the map.`;
+                    list.appendChild(empty);
+                    return;
+                }
+
+                items.forEach(d => {
+                    const el = document.createElement('div');
+                    el.className = 'flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:border-korea-blue transition-colors cursor-pointer group';
+                    el.onclick = () => this.addToItinerary(d.id);
+
+                    const thumb = d.imageUrl
+                        ? `<img src="${d.imageUrl}" alt="" class="w-10 h-10 rounded-lg object-cover bg-slate-50" loading="lazy" />`
+                        : `<div class="text-2xl bg-slate-50 w-10 h-10 flex items-center justify-center rounded-lg">${d.img || '📍'}</div>`;
+
+                    el.innerHTML = `
+                        ${thumb}
+                        <div class="flex-1">
+                            <div class="font-semibold text-sm text-slate-800">${d.name}</div>
+                            <div class="text-xs text-slate-500 flex items-center gap-1">
+                                ${d.region || d.category || ''}
+                                ${d.tel ? `<span class="ml-2 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">☎ ${d.tel}</span>` : ''}
+                            </div>
+                        </div>
+                        <button class="w-8 h-8 rounded-full bg-slate-50 text-korea-blue flex items-center justify-center group-hover:bg-korea-blue group-hover:text-white transition-all">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                        </button>
+                    `;
+                    list.appendChild(el);
+                });
+
+                lucide.createIcons();
+            },
+
+            filterExplore() {
+                // ✅ API 재조회(타이핑은 debounce)
+                if (this._debouncedExplore) this._debouncedExplore();
+                else this.refreshExploreFromAPI().catch(console.error);
+            },
+
+            setCategory(cat) {
+                this.filterCat = cat;
+                this.renderCategories();
+                this.refreshExploreFromAPI().catch(console.error);
+            },
+
+            renderCategories() {
+                const container = document.getElementById('category-chips');
+                container.innerHTML = UI_CATEGORIES.map(c => `
+                    <button onclick="app.setCategory('${c}')"
+                        class="px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+                            this.filterCat === c
+                            ? 'bg-slate-800 text-white border-slate-800'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                        }">
+                        ${c}
+                    </button>
+                `).join('');
+            },
+
+            async refreshExploreFromAPI() {
+                const srcEl = document.getElementById("explore-source");
+                // key missing -> just fallback UI render
+                if (!TOUR_API.serviceKey || TOUR_API.serviceKey.includes("PUT_YOUR_SERVICE_KEY")) {
+                    if (srcEl) srcEl.textContent = "Source: Local demo (no TourAPI key)";
+                    this.exploreResults = [];
+                    this.isExploreLoading = false;
+                    this.renderExplore();
+                    return;
+                }
+
+                if (srcEl) srcEl.textContent = "Source: TourAPI (loading...)";
+                this.isExploreLoading = true;
+                this.renderExplore();
+
+                const search = (document.getElementById('explore-search')?.value || "").trim();
+                const typeId = TOUR_CONTENT_TYPE[this.filterCat] ?? null;
+
+                try {
+                    let rawItems = [];
+
+                    if (search) {
+                        // Keyword search (nationwide)
+                        const data = await _tourFetch("searchKeyword2", {
+                            pageNo: 1,
+                            numOfRows: 30,
+                            arrange: "A",
+                            keyword: search,
+                            ...(typeId ? { contentTypeId: typeId } : {})
+                        });
+                        rawItems = _tourItems(data);
+                    } else {
+                        // Nearby search around map center (radius derived from viewport, capped 20km)
+                        const c = this.map.getCenter();
+                        const b = this.map.getBounds();
+                        const corners = [b.getNorthEast(), b.getNorthWest(), b.getSouthEast(), b.getSouthWest()];
+                        let maxDist = 0;
+                        for (const p of corners) maxDist = Math.max(maxDist, _haversineMeters(c.lat, c.lng, p.lat, p.lng));
+                        const radius = Math.min(20000, Math.max(2000, Math.round(maxDist)));
+
+                        const data = await _tourFetch("locationBasedList2", {
+                            pageNo: 1,
+                            numOfRows: 40,
+                            arrange: "E", // by distance
+                            mapX: c.lng,
+                            mapY: c.lat,
+                            radius,
+                            ...(typeId ? { contentTypeId: typeId } : {})
+                        });
+                        rawItems = _tourItems(data);
+                    }
+
+                    const normalized = rawItems
+                        .map(_normalizeTourItem)
+                        .filter(Boolean)
+                        .filter(d => this.isWithinKorea(d.lat, d.lng)); // keep South Korea only
+
+                    // upsert into index
+                    normalized.forEach(d => {
+                        this.destIndex.set(d.id, d);
+                        this.dynamicDestIds.add(d.id);
+                    });
+
+                    this.exploreResults = normalized;
+                    if (srcEl) srcEl.textContent = `Source: TourAPI (${normalized.length} items)`;
+
+                    // optional: update choropleth after new POIs
+                    this.refreshProvinceDensity();
+
+                } catch (err) {
+                    if (srcEl) srcEl.textContent = `Source: Local demo (TourAPI failed: ${err?.message || err})`;
+                    console.warn("[TourAPI] failed:", err);
+                    console.warn("TourAPI fetch failed (maybe CORS). Falling back to local dataset.", err);
+                    this.exploreResults = [];
+                } finally {
+                    this.isExploreLoading = false;
+                    this.renderExplore();
+                    this.updateUI();
+                }
+            },
+
+            // --- Drag & Drop ---
+            initSortable() {
+                const list = document.getElementById('itinerary-list');
+                Sortable.create(list, {
+                    animation: 150,
+                    handle: '.timeline-item',
+                    draggable: '.timeline-item',
+                    filter: '.timeline-line',
+                    onEnd: () => {
+                        const newOrder = [];
+                        const items = list.querySelectorAll('[data-id]');
+                        items.forEach(el => newOrder.push(el.dataset.id));
+                        this.itinerary = newOrder;
+                        this.updateUI();
+                    }
+                });
+            },
+
+            // --- Tabs ---
+            switchTab(tab) {
+                this.activeTab = tab;
+
+                ['planner', 'assistant', 'explore'].forEach(t => {
+                    document.getElementById(`panel-${t}`).classList.add('hidden');
+                    const btn = document.getElementById(`tab-${t}`);
+                    btn.classList.remove('border-korea-blue', 'text-korea-blue');
+                    btn.classList.add('border-transparent', 'text-slate-400');
+                });
+
+                document.getElementById(`panel-${tab}`).classList.remove('hidden');
+                const activeBtn = document.getElementById(`tab-${tab}`);
+                activeBtn.classList.remove('border-transparent', 'text-slate-400');
+                activeBtn.classList.add('border-korea-blue', 'text-korea-blue');
+
+                if (tab === 'assistant') {
+                    document.getElementById('chat-input').focus();
+                }
+                if (tab === 'explore') {
+                    this.refreshExploreFromAPI().catch(console.error);
+                }
+            },
+
+            // --- Chat (heuristic; still uses local dataset) ---
+            initChat() {},
+
+            handleChat(e) {
+                e.preventDefault();
+                const input = document.getElementById('chat-input');
+                const text = input.value.trim().toLowerCase();
+                if (!text) return;
+
+                this.addChatBubble(input.value, 'user');
+                input.value = '';
+
+                setTimeout(() => {
+                    this.generateAIResponse(text);
+                }, 600);
+            },
+
+            addChatBubble(text, sender) {
+                const container = document.getElementById('chat-history');
+                const div = document.createElement('div');
+                div.className = `flex items-start gap-3 ${sender === 'user' ? 'flex-row-reverse' : ''}`;
+                
+                const avatar = sender === 'ai' 
+                    ? `<div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0"><i data-lucide="bot" class="w-5 h-5"></i></div>`
+                    : `<div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shrink-0"><i data-lucide="user" class="w-5 h-5"></i></div>`;
+
+                const bubbleClass = sender === 'ai'
+                    ? 'bg-white rounded-2xl rounded-tl-none border border-slate-100 text-slate-700'
+                    : 'bg-korea-blue text-white rounded-2xl rounded-tr-none';
+
+                div.innerHTML = `
+                    ${avatar}
+                    <div class="${bubbleClass} p-3 shadow-sm max-w-[85%] text-sm">
+                        ${text}
+                    </div>
+                `;
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+                lucide.createIcons();
+            },
+
+            generateAIResponse(query) {
+                let suggestions = [];
+                let msg = "I'm not sure, but here are some popular spots.";
+
+                if (query.includes('nature') || query.includes('hike') || query.includes('mountain')) {
+                    suggestions = DESTINATIONS.filter(d => d.category === 'Nature' || d.category === 'Hiking').slice(0, 3);
+                    msg = "Korea has amazing mountains and coastlines. Here are top nature picks.";
+                } else if (query.includes('food') || query.includes('eat')) {
+                    suggestions = DESTINATIONS.filter(d => d.category === 'Food').slice(0, 3);
+                    msg = "You can't miss these culinary hotspots!";
+                } else if (query.includes('history') || query.includes('culture')) {
+                    suggestions = DESTINATIONS.filter(d => d.category === 'History' || d.category === 'Culture').slice(0, 3);
+                    msg = "Step back in time at these historical landmarks.";
+                } else if (query.includes('hidden') || query.includes('quiet') || query.includes('crowd')) {
+                    suggestions = DESTINATIONS.filter(d => d.crowd <= 3).slice(0, 4);
+                    msg = "I found some less crowded 'hidden gems' for a more relaxed trip.";
+                } else if (query.includes('jeju')) {
+                    suggestions = DESTINATIONS.filter(d => d.region === 'Jeju').slice(0, 3);
+                    msg = "Jeju Island is beautiful! Here are the must-sees.";
+                } else if (query.includes('busan')) {
+                    suggestions = DESTINATIONS.filter(d => d.region === 'Busan').slice(0, 3);
+                    msg = "Busan offers great beaches and markets.";
+                }
+
+                if (this.provinceFilteredIds) {
+                    suggestions = suggestions.filter(d => this.provinceFilteredIds.has(d.id));
+                }
+
+                if (suggestions.length === 0) {
+                    suggestions = [DESTINATIONS[0], DESTINATIONS[6], DESTINATIONS[10]]
+                        .filter(d => !this.provinceFilteredIds || this.provinceFilteredIds.has(d.id));
+                    if (suggestions.length === 0) suggestions = [DESTINATIONS[0], DESTINATIONS[6], DESTINATIONS[10]];
+                }
+
+                this.addChatBubble(msg, 'ai');
+                
+                const suggContainer = document.getElementById('ai-suggestions');
+                suggContainer.innerHTML = '';
+                suggestions.forEach(d => {
+                    const btn = document.createElement('div');
+                    btn.className = 'inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-2 pr-4 cursor-pointer hover:border-korea-blue shadow-sm min-w-fit transition-all hover:-translate-y-1';
+                    btn.onclick = () => this.addToItinerary(d.id);
+                    btn.innerHTML = `
+                        <div class="text-xl">${d.img}</div>
+                        <div class="text-left">
+                            <div class="text-xs font-bold text-slate-800">${d.name}</div>
+                            <div class="text-[10px] text-slate-500">Add to plan</div>
+                        </div>
+                    `;
+                    suggContainer.appendChild(btn);
+                });
+                document.getElementById('chat-history').scrollTop = document.getElementById('chat-history').scrollHeight;
+            },
+
+            exportPlan() {
+                if (this.itinerary.length === 0) return alert("Nothing to export!");
+                const plan = this.itinerary.map((id, idx) => {
+                    const d = this.destIndex.get(id);
+                    if (!d) return `${idx+1}. (missing)`;
+                    return `${idx+1}. ${d.name} (${d.region || ''})`;
+                }).join('\n');
+                
+                navigator.clipboard.writeText("My Korea Trip:\n" + plan).then(() => {
+                    alert("Itinerary copied to clipboard!");
+                });
+            }
+        };
+
+        // Start App
+        window.addEventListener('DOMContentLoaded', () => {
+            // ⚠️ fetch(GeoJSON / TourAPI) 때문에 file://로 직접 열면 막힐 수 있어요.
+            // 로컬에서 실행 시: python -m http.server 8000  (또는 VSCode Live Server)
+            app.init().catch(console.error);
+        });
+    </script>
+</body>
+</html>
